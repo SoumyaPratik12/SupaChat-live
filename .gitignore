@@ -94,5 +94,8 @@ TODO.md
 .temp/
 temp/
 
+# Frontend lib is needed (exception to lib/ exclusion)
+!frontend/lib/
+
 # CI/CD
 .github/workflows/logs/
