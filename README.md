@@ -1,4 +1,4 @@
-# SupaChat - DevOps Full-Stack Application
+# SupaChat-live
 
 A production-ready conversational analytics application built with React, FastAPI, Supabase PostgreSQL, and deployed with Docker, Nginx, and comprehensive monitoring.
 
