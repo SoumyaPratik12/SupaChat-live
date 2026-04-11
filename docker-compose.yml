@@ -1,6 +1,6 @@
 services:
   # ============================================================================
-  # BACKEND (FastAPI)
+  # BACKEND (FastAPI + Supabase + Prometheus metrics)
   # ============================================================================
   backend:
     build:
@@ -16,6 +16,14 @@ services:
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -43,6 +51,14 @@ services:
       - backend
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
@@ -52,7 +68,7 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # NGINX (Reverse Proxy)
+  # NGINX (Reverse Proxy — / → frontend, /api → backend)
   # ============================================================================
   nginx:
     image: nginx:alpine
@@ -66,6 +82,11 @@ services:
       - frontend
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health || exit 1"]
       interval: 30s
@@ -74,7 +95,7 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # PROMETHEUS (Metrics Collection)
+  # PROMETHEUS (Metrics collection)
   # ============================================================================
   prometheus:
     image: prom/prometheus:v2.48.1
@@ -91,10 +112,15 @@ services:
       - '--web.enable-lifecycle'
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     restart: unless-stopped
 
   # ============================================================================
-  # GRAFANA (Dashboards)
+  # GRAFANA (Dashboards — CPU, memory, request latency, logs)
   # ============================================================================
   grafana:
     image: grafana/grafana:10.2.3
@@ -114,10 +140,15 @@ services:
       - loki
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     restart: unless-stopped
 
   # ============================================================================
-  # LOKI (Log Aggregation)
+  # LOKI (Log aggregation)
   # ============================================================================
   loki:
     image: grafana/loki:2.9.3
@@ -130,10 +161,15 @@ services:
     command: -config.file=/etc/loki/local-config.yml
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     restart: unless-stopped
 
   # ============================================================================
-  # PROMTAIL (Log Shipper → Loki)
+  # PROMTAIL (Log shipper → Loki)
   # ============================================================================
   promtail:
     image: grafana/promtail:2.9.3
@@ -147,10 +183,15 @@ services:
       - loki
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
     restart: unless-stopped
 
   # ============================================================================
-  # CADVISOR (Container Metrics → Prometheus)
+  # CADVISOR (Container metrics → Prometheus)
   # ============================================================================
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -164,6 +205,11 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
     networks:
       - supachat-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
     restart: unless-stopped
 
 networks:
