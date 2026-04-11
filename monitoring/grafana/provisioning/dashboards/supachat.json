@@ -1,0 +1,85 @@
+{
+  "title": "SupaChat Overview",
+  "uid": "supachat-overview",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP Requests / sec",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(supachat_requests_total[1m])",
+          "legendFormat": "{{method}} {{endpoint}} {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "NL Queries Processed",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "supachat_nl_queries_total", "legendFormat": "Total" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Query Duration p95 (s)",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(supachat_query_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Container CPU Usage %",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(container_cpu_usage_seconds_total{name=~\"supachat.*\"}[1m]) * 100",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Container Memory Usage (MB)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "container_memory_usage_bytes{name=~\"supachat.*\"} / 1024 / 1024",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Backend Logs",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{container_name=\"supachat-backend\"}",
+          "legendFormat": ""
+        }
+      ]
+    }
+  ]
+}

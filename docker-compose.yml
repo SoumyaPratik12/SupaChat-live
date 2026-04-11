@@ -125,6 +125,24 @@ services:
       - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yml:ro
       - loki-data:/loki
     command: -config.file=/etc/loki/local-config.yml
+    depends_on: []
+    networks:
+      - supachat-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # CADVISOR (Container Metrics for Prometheus)
+  # ============================================================================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: supachat-cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
     networks:
       - supachat-network
     restart: unless-stopped

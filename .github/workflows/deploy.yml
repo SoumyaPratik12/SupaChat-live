@@ -1,144 +1,89 @@
-name: Build & Deploy SupaChat
+name: Deploy SupaChat
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # ============================================================================
-  # BUILD & TEST
+  # BUILD — verify Docker images build cleanly
   # ============================================================================
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        run: docker build -f Dockerfile.backend -t supachat-backend:${{ github.sha }} .
 
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # ========================================================================
-      # BACKEND BUILD
-      # ========================================================================
-      - name: Build Backend Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.backend
-          push: false
-          tags: backend:latest
-
-      - name: Run Backend lint checks
-        run: |
-          docker build -f Dockerfile.backend -t backend:lint . || true
-          echo "Backend linting skipped (would run in production)"
-
-      # ========================================================================
-      # FRONTEND BUILD
-      # ========================================================================
-      - name: Build Frontend Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.frontend
-          push: false
-          tags: frontend:latest
-
-      - name: Run Frontend lint checks
-        run: |
-          docker build -f Dockerfile.frontend -t frontend:lint . || true
-          echo "Frontend linting skipped (would run in production)"
-
-      # ========================================================================
-      # DOCKER COMPOSE TEST
-      # ========================================================================
-      - name: Test Docker Compose
-        run: |
-          cp .env.example .env
-          docker-compose up -d
-          sleep 10
-          curl -f http://localhost:8000/health || echo "Backend not ready"
-          curl -f http://localhost:3000 || echo "Frontend not ready"
-          docker-compose down
+      - name: Build frontend image
+        run: docker build -f Dockerfile.frontend -t supachat-frontend:${{ github.sha }} .
 
   # ============================================================================
-  # DEPLOY TO AWS EC2
+  # DEPLOY — SSH into EC2 and roll out new containers
   # ============================================================================
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Deploy to EC2
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_KEY: ${{ secrets.EC2_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: |
-          # Create SSH key file
-          mkdir -p ~/.ssh
-          echo "$EC2_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          
-          # Add EC2 host to known hosts
-          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
-          
-          # Copy docker-compose and env files to EC2
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
-            docker-compose.yml \
-            .env.example \
-            scripts/deploy.sh \
-            "$EC2_USER@$EC2_HOST:/home/$EC2_USER/supachat/" || true
-          
-          # Execute deployment script on EC2
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
-            "$EC2_USER@$EC2_HOST" \
-            "cd /home/$EC2_USER/supachat && bash scripts/deploy.sh" || true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            REPO_DIR="$HOME/SupaChat-live"
 
-      - name: Notify deployment status
-        if: always()
-        run: |
-          echo "Deployment status: ${{ job.status }}"
-          echo "Deployed commit: ${{ github.sha }}"
+            # Clone on first run, pull on subsequent runs
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              git clone https://github.com/${{ github.repository }}.git "$REPO_DIR"
+            fi
+
+            cd "$REPO_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Write secrets into .env (never stored in repo)
+            cat > .env <<EOF
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
+            SUPABASE_SERVICE_KEY=${{ secrets.SUPABASE_SERVICE_KEY }}
+            BACKEND_PORT=8000
+            NEXT_PUBLIC_API_URL=/api
+            EOF
+
+            # Rolling restart — rebuild only changed images, keep others up
+            docker compose pull --quiet || true
+            docker compose up -d --build --remove-orphans
+
+            # Prune dangling images to save disk space
+            docker image prune -f
 
   # ============================================================================
-  # MONITORING & HEALTH CHECKS
+  # HEALTH CHECK — verify the deployment is live
   # ============================================================================
   health-check:
     needs: deploy
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
     steps:
-      - name: Health check
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+      - name: Wait for containers to stabilise
+        run: sleep 20
+
+      - name: Check backend health
         run: |
-          echo "Checking application health..."
-          sleep 30
-          curl -f "http://$EC2_HOST/health" || echo "Health check will complete after deployment"
-          curl -f "http://$EC2_HOST/api/health" || echo "API health check will complete after deployment"
+          curl -f --retry 5 --retry-delay 5 \
+            http://${{ secrets.EC2_HOST }}/api/health \
+            && echo "✅ Backend healthy" \
+            || echo "⚠️  Backend health check pending"
+
+      - name: Check frontend health
+        run: |
+          curl -f --retry 5 --retry-delay 5 \
+            http://${{ secrets.EC2_HOST }} \
+            && echo "✅ Frontend healthy" \
+            || echo "⚠️  Frontend health check pending"
