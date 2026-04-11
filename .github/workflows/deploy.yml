@@ -6,7 +6,7 @@ on:
 
 jobs:
   # ============================================================================
-  # BUILD — verify Docker images build cleanly
+  # BUILD — verify both Docker images compile cleanly
   # ============================================================================
   build:
     runs-on: ubuntu-latest
@@ -20,7 +20,7 @@ jobs:
         run: docker build -f Dockerfile.frontend -t supachat-frontend:${{ github.sha }} .
 
   # ============================================================================
-  # DEPLOY — SSH into EC2 and roll out new containers
+  # DEPLOY — SSH into EC2 and roll out updated containers
   # ============================================================================
   deploy:
     needs: build
@@ -31,10 +31,15 @@ jobs:
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: SUPABASE_URL,SUPABASE_KEY,SUPABASE_SERVICE_KEY
           script: |
             set -e
             REPO_DIR="$HOME/SupaChat-live"
@@ -48,42 +53,39 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Write secrets into .env (never stored in repo)
-            cat > .env <<EOF
-            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-            SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
-            SUPABASE_SERVICE_KEY=${{ secrets.SUPABASE_SERVICE_KEY }}
-            BACKEND_PORT=8000
-            NEXT_PUBLIC_API_URL=/api
-            EOF
+            # Write .env — no heredoc indentation issues
+            printf 'SUPABASE_URL=%s\n' "$SUPABASE_URL"         > .env
+            printf 'SUPABASE_KEY=%s\n' "$SUPABASE_KEY"        >> .env
+            printf 'SUPABASE_SERVICE_KEY=%s\n' "$SUPABASE_SERVICE_KEY" >> .env
+            printf 'BACKEND_PORT=8000\n'                       >> .env
+            printf 'NEXT_PUBLIC_API_URL=/api\n'                >> .env
 
-            # Rolling restart — rebuild only changed images, keep others up
-            docker compose pull --quiet || true
+            # Rebuild and restart only changed services
             docker compose up -d --build --remove-orphans
 
-            # Prune dangling images to save disk space
+            # Clean up dangling images
             docker image prune -f
 
   # ============================================================================
-  # HEALTH CHECK — verify the deployment is live
+  # HEALTH CHECK — confirm deployment is live
   # ============================================================================
   health-check:
     needs: deploy
     runs-on: ubuntu-latest
     steps:
       - name: Wait for containers to stabilise
-        run: sleep 20
+        run: sleep 30
 
-      - name: Check backend health
+      - name: Check Nginx / frontend
         run: |
-          curl -f --retry 5 --retry-delay 5 \
+          curl -f --retry 5 --retry-delay 10 \
+            http://${{ secrets.EC2_HOST }}/health \
+            && echo "✅ Nginx healthy" \
+            || echo "⚠️  Nginx health check pending"
+
+      - name: Check backend API
+        run: |
+          curl -f --retry 5 --retry-delay 10 \
             http://${{ secrets.EC2_HOST }}/api/health \
             && echo "✅ Backend healthy" \
             || echo "⚠️  Backend health check pending"
-
-      - name: Check frontend health
-        run: |
-          curl -f --retry 5 --retry-delay 5 \
-            http://${{ secrets.EC2_HOST }} \
-            && echo "✅ Frontend healthy" \
-            || echo "⚠️  Frontend health check pending"

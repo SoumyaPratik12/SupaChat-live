@@ -1,10 +1,11 @@
 {
   "title": "SupaChat Overview",
   "uid": "supachat-overview",
-  "schemaVersion": 36,
+  "schemaVersion": 38,
   "version": 1,
   "refresh": "30s",
   "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
   "panels": [
     {
       "id": 1,
@@ -12,21 +13,36 @@
       "type": "timeseries",
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0 }
+      },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "rate(supachat_requests_total[1m])",
-          "legendFormat": "{{method}} {{endpoint}} {{status}}"
+          "legendFormat": "{{method}} {{endpoint}} ({{status}})",
+          "refId": "A"
         }
       ]
     },
     {
       "id": 2,
-      "title": "NL Queries Processed",
+      "title": "NL Queries Total",
       "type": "stat",
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }] }
+        }
+      },
       "targets": [
-        { "expr": "supachat_nl_queries_total", "legendFormat": "Total" }
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "supachat_nl_queries_total",
+          "legendFormat": "Queries",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -35,49 +51,189 @@
       "type": "stat",
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 3 }
+          ]}
+        }
+      },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, rate(supachat_query_duration_seconds_bucket[5m]))",
-          "legendFormat": "p95"
+          "legendFormat": "p95",
+          "refId": "A"
         }
       ]
     },
     {
       "id": 4,
-      "title": "Container CPU Usage %",
+      "title": "Error Rate (5xx / sec)",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0,
+          "color": { "fixedColor": "red", "mode": "fixed" }
+        }
+      },
       "targets": [
         {
-          "expr": "rate(container_cpu_usage_seconds_total{name=~\"supachat.*\"}[1m]) * 100",
-          "legendFormat": "{{name}}"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(supachat_requests_total{status=\"500\"}[1m])",
+          "legendFormat": "5xx errors",
+          "refId": "A"
         }
       ]
     },
     {
       "id": 5,
-      "title": "Container Memory Usage (MB)",
+      "title": "Container CPU Usage %",
       "type": "timeseries",
-      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 }
+      },
       "targets": [
         {
-          "expr": "container_memory_usage_bytes{name=~\"supachat.*\"} / 1024 / 1024",
-          "legendFormat": "{{name}}"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(container_cpu_usage_seconds_total{name=~\"supachat.*\"}[1m]) * 100",
+          "legendFormat": "{{name}}",
+          "refId": "A"
         }
       ]
     },
     {
       "id": 6,
-      "title": "Backend Logs",
-      "type": "logs",
-      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
-      "datasource": { "type": "loki", "uid": "loki" },
+      "title": "Container Memory Usage (MB)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "decmbytes", "min": 0 }
+      },
       "targets": [
         {
-          "expr": "{container_name=\"supachat-backend\"}",
-          "legendFormat": ""
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "container_memory_usage_bytes{name=~\"supachat.*\"} / 1024 / 1024",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Container Network I/O (bytes/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "Bps" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(container_network_receive_bytes_total{name=~\"supachat.*\"}[1m])",
+          "legendFormat": "{{name}} rx",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(container_network_transmit_bytes_total{name=~\"supachat.*\"}[1m])",
+          "legendFormat": "{{name}} tx",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Running Containers",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 16, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 5 }
+          ]}
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(container_last_seen{name=~\"supachat.*\"})",
+          "legendFormat": "Containers",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Prometheus Scrape Health",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 16, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Backend Logs",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=\"supachat-backend\"}",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Nginx Access Logs",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 30, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=\"supachat-nginx\"}",
+          "legendFormat": "",
+          "refId": "A"
         }
       ]
     }

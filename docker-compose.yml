@@ -1,6 +1,6 @@
 services:
   # ============================================================================
-  # BACKEND SERVICE (FastAPI)
+  # BACKEND (FastAPI)
   # ============================================================================
   backend:
     build:
@@ -21,11 +21,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
 
   # ============================================================================
-  # FRONTEND SERVICE (Next.js)
+  # FRONTEND (Next.js)
   # ============================================================================
   frontend:
     build:
@@ -48,11 +48,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 15s
     restart: unless-stopped
 
   # ============================================================================
-  # NGINX REVERSE PROXY
+  # NGINX (Reverse Proxy)
   # ============================================================================
   nginx:
     image: nginx:alpine
@@ -77,7 +77,7 @@ services:
   # PROMETHEUS (Metrics Collection)
   # ============================================================================
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.48.1
     container_name: supachat-prometheus
     ports:
       - "9090:9090"
@@ -87,28 +87,31 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
     networks:
       - supachat-network
     restart: unless-stopped
 
   # ============================================================================
-  # GRAFANA (Visualization)
+  # GRAFANA (Dashboards)
   # ============================================================================
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.2.3
     container_name: supachat-grafana
     ports:
       - "3001:3000"
     environment:
+      GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_INSTALL_PLUGINS: 'grafana-piechart-panel'
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+      - loki
     networks:
       - supachat-network
     restart: unless-stopped
@@ -117,7 +120,7 @@ services:
   # LOKI (Log Aggregation)
   # ============================================================================
   loki:
-    image: grafana/loki:2.8.2
+    image: grafana/loki:2.9.3
     container_name: supachat-loki
     ports:
       - "3100:3100"
@@ -125,16 +128,32 @@ services:
       - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yml:ro
       - loki-data:/loki
     command: -config.file=/etc/loki/local-config.yml
-    depends_on: []
     networks:
       - supachat-network
     restart: unless-stopped
 
   # ============================================================================
-  # CADVISOR (Container Metrics for Prometheus)
+  # PROMTAIL (Log Shipper → Loki)
+  # ============================================================================
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: supachat-promtail
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - supachat-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # CADVISOR (Container Metrics → Prometheus)
   # ============================================================================
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
     container_name: supachat-cadvisor
     ports:
       - "8080:8080"

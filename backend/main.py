@@ -7,9 +7,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
-from prometheus_client import Counter, Histogram, generate_latest
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 import time
 
 # Logging
@@ -366,7 +367,7 @@ async def get_query_history(limit: int = 10):
 @app.get("/metrics")
 async def prometheus_metrics():
     """Prometheus metrics endpoint"""
-    return generate_latest().decode("utf-8")
+    return PlainTextResponse(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/")
