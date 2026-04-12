@@ -7,23 +7,29 @@ positions:
 
 clients:
   - url: http://loki:3100/loki/api/v1/push
+    tenant_id: fake
 
 scrape_configs:
-  - job_name: docker
+  - job_name: docker-containers
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
-        filters:
-          - name: name
-            values: [supachat-backend, supachat-frontend, supachat-nginx, supachat-prometheus, supachat-grafana, supachat-loki]
     relabel_configs:
+      # Keep only supachat-* containers
+      - source_labels: [__meta_docker_container_name]
+        regex: /supachat-.*
+        action: keep
+      # Strip leading slash from container name → container label
       - source_labels: [__meta_docker_container_name]
         regex: /(.*)
         target_label: container
+        replacement: $1
+      # Set job label: supachat-backend → supachat-backend
       - source_labels: [__meta_docker_container_name]
-        regex: /supachat-(.*)
+        regex: /(.*)
         target_label: job
-        replacement: supachat-$1
+        replacement: $1
+      # Log stream (stdout/stderr)
       - source_labels: [__meta_docker_container_log_stream]
         target_label: stream
     pipeline_stages:

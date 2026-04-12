@@ -6,7 +6,7 @@ on:
 
 jobs:
   # ============================================================================
-  # BUILD — verify both Docker images compile cleanly
+  # BUILD — verify both Docker images compile cleanly on GitHub runners
   # ============================================================================
   build:
     runs-on: ubuntu-latest
@@ -19,8 +19,13 @@ jobs:
       - name: Build frontend image
         run: docker build -f Dockerfile.frontend -t supachat-frontend:${{ github.sha }} .
 
+      - name: Confirm images built
+        run: |
+          docker images | grep supachat
+          echo "✅ Both images built successfully"
+
   # ============================================================================
-  # DEPLOY — SSH into EC2 and roll out updated containers
+  # DEPLOY — SSH into EC2, pull latest code, restart containers
   # ============================================================================
   deploy:
     needs: build
@@ -29,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to EC2
+      - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -39,12 +44,15 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          timeout: 60s
+          command_timeout: 20m
           envs: SUPABASE_URL,SUPABASE_KEY,SUPABASE_SERVICE_KEY
           script: |
             set -e
             REPO_DIR="$HOME/SupaChat-live"
 
-            # Clone on first run, pull on subsequent runs
+            # ── Clone on first run, pull on subsequent runs ──────────────────
             if [ ! -d "$REPO_DIR/.git" ]; then
               git clone https://github.com/${{ github.repository }}.git "$REPO_DIR"
             fi
@@ -53,21 +61,31 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Write .env — no heredoc indentation issues
-            printf 'SUPABASE_URL=%s\n' "$SUPABASE_URL"         > .env
-            printf 'SUPABASE_KEY=%s\n' "$SUPABASE_KEY"        >> .env
+            # ── Write .env from secrets (printf avoids heredoc indent issues) ─
+            printf 'SUPABASE_URL=%s\n'         "$SUPABASE_URL"         > .env
+            printf 'SUPABASE_KEY=%s\n'         "$SUPABASE_KEY"        >> .env
             printf 'SUPABASE_SERVICE_KEY=%s\n' "$SUPABASE_SERVICE_KEY" >> .env
-            printf 'BACKEND_PORT=8000\n'                       >> .env
-            printf 'NEXT_PUBLIC_API_URL=/api\n'                >> .env
+            printf 'BACKEND_PORT=8000\n'                               >> .env
+            printf 'NEXT_PUBLIC_API_URL=/api\n'                        >> .env
 
-            # Rebuild and restart only changed services
-            docker compose up -d --build --remove-orphans
+            # ── Support both docker compose v2 (plugin) and v1 (standalone) ──
+            if docker compose version &>/dev/null 2>&1; then
+              COMPOSE="docker compose"
+            else
+              COMPOSE="docker-compose"
+            fi
 
-            # Clean up dangling images
+            # ── Rolling restart — rebuild changed images, keep others up ──────
+            $COMPOSE up -d --build --remove-orphans
+
+            # ── Prune dangling images to save disk ────────────────────────────
             docker image prune -f
 
+            echo "✅ Deployment complete — $(date)"
+            $COMPOSE ps
+
   # ============================================================================
-  # HEALTH CHECK — confirm deployment is live
+  # HEALTH CHECK — confirm the deployment is publicly reachable
   # ============================================================================
   health-check:
     needs: deploy
@@ -76,16 +94,29 @@ jobs:
       - name: Wait for containers to stabilise
         run: sleep 30
 
-      - name: Check Nginx / frontend
+      - name: Check Nginx health endpoint
         run: |
-          curl -f --retry 5 --retry-delay 10 \
+          curl -f --retry 6 --retry-delay 10 --retry-connrefused \
             http://${{ secrets.EC2_HOST }}/health \
             && echo "✅ Nginx healthy" \
-            || echo "⚠️  Nginx health check pending"
+            || echo "⚠️  Nginx not yet reachable — check EC2 Security Group port 80"
 
-      - name: Check backend API
+      - name: Check backend API health
         run: |
-          curl -f --retry 5 --retry-delay 10 \
+          curl -f --retry 6 --retry-delay 10 --retry-connrefused \
             http://${{ secrets.EC2_HOST }}/api/health \
             && echo "✅ Backend healthy" \
-            || echo "⚠️  Backend health check pending"
+            || echo "⚠️  Backend not yet reachable"
+
+      - name: Print deployment summary
+        run: |
+          echo "================================================"
+          echo " SupaChat Deployment Summary"
+          echo "================================================"
+          echo " Commit : ${{ github.sha }}"
+          echo " Branch : ${{ github.ref_name }}"
+          echo " Actor  : ${{ github.actor }}"
+          echo " App    : http://${{ secrets.EC2_HOST }}"
+          echo " Grafana: http://${{ secrets.EC2_HOST }}:3001"
+          echo " Prom   : http://${{ secrets.EC2_HOST }}:9090"
+          echo "================================================"
