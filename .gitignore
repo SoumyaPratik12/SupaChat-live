@@ -100,5 +100,8 @@ temp/
 # DevOps agent (local tooling only)
 devops-agent/
 
+# Dev test scripts
+backend/test_live.py
+
 # CI/CD
 .github/workflows/logs/
