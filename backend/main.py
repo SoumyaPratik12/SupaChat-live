@@ -4,6 +4,9 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()  # must be before any os.getenv calls
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,9 +44,6 @@ nl_query_count = Counter(
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-from dotenv import load_dotenv
-load_dotenv()  # loads .env automatically for local dev
-
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
