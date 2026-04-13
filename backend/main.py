@@ -1,7 +1,7 @@
 import os
-import asyncio
 import logging
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
@@ -41,6 +41,9 @@ nl_query_count = Counter(
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
+from dotenv import load_dotenv
+load_dotenv()  # loads .env automatically for local dev
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
@@ -216,76 +219,89 @@ LIMIT  20;""",
     )
 
 # ============================================================================
-# SQL EXECUTION — real Supabase with mock fallback
+# SQL EXECUTION — real Supabase table API, no mock
 # ============================================================================
 async def execute_sql(sql: str, query_type: str) -> List[Dict[str, Any]]:
     logger.info(f"Executing [{query_type}]: {sql[:80].strip()}...")
 
     client = get_supabase()
+    if not client:
+        raise HTTPException(status_code=503, detail="Supabase not configured. Set SUPABASE_URL and SUPABASE_KEY in .env")
 
-    # ── Real Supabase execution ──────────────────────────────────────────────
-    if client:
-        try:
-            # Use Supabase RPC for raw SQL (requires exec_sql function in DB)
-            # Falls back to table API for simple selects
-            result = client.rpc("exec_sql", {"query": sql}).execute()
-            if result.data:
-                return result.data
-        except Exception as e:
-            logger.warning(f"Supabase RPC failed ({e}), trying table API...")
+    # Fetch all articles from Supabase
+    result = client.table("articles").select("*").execute()
+    rows: List[Dict[str, Any]] = result.data or []
 
-        try:
-            if query_type in ("trending", "compare", "performance", "list"):
-                result = client.table("articles").select("*").execute()
-                if result.data:
-                    return _apply_mock_transform(query_type)
-        except Exception as e:
-            logger.warning(f"Supabase table API failed ({e}), using mock data")
+    if not rows:
+        return []
 
-    # ── Mock data fallback ───────────────────────────────────────────────────
-    await asyncio.sleep(0.3)
-    return _apply_mock_transform(query_type)
-
-
-def _apply_mock_transform(query_type: str) -> List[Dict[str, Any]]:
+    # ── Transform real data per query type ──────────────────────────────────
     if query_type == "trending":
-        return [
-            {"topic": "AI",     "article_count": 15, "total_views": 5230, "avg_engagement": 0.78},
-            {"topic": "DevOps", "article_count": 12, "total_views": 4120, "avg_engagement": 0.72},
-            {"topic": "Web3",   "article_count": 8,  "total_views": 2950, "avg_engagement": 0.65},
-            {"topic": "Cloud",  "article_count": 10, "total_views": 3800, "avg_engagement": 0.70},
-        ]
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        filtered = [r for r in rows if r.get("published_date", "") >= cutoff]
+        if not filtered:
+            filtered = rows  # fallback: use all if none in last 30 days
+        groups: Dict[str, Any] = defaultdict(lambda: {"article_count": 0, "total_views": 0, "engagement_sum": 0.0})
+        for r in filtered:
+            t = r["topic"]
+            groups[t]["article_count"] += 1
+            groups[t]["total_views"]   += r.get("views", 0)
+            groups[t]["engagement_sum"] += r.get("engagement_rate", 0)
+        return sorted(
+            [{"topic": t,
+              "article_count": v["article_count"],
+              "total_views": v["total_views"],
+              "avg_engagement": round(v["engagement_sum"] / v["article_count"], 2)}
+             for t, v in groups.items()],
+            key=lambda x: x["total_views"], reverse=True
+        )[:10]
+
     if query_type == "compare":
-        return [
-            {"topic": "AI",     "article_count": 42, "avg_views": 185, "avg_engagement": 0.82, "avg_shares": 12.5},
-            {"topic": "DevOps", "article_count": 38, "avg_views": 156, "avg_engagement": 0.75, "avg_shares": 9.8},
-            {"topic": "Web3",   "article_count": 25, "avg_views": 118, "avg_engagement": 0.68, "avg_shares": 7.2},
-            {"topic": "Cloud",  "article_count": 30, "avg_views": 140, "avg_engagement": 0.71, "avg_shares": 8.1},
-        ]
+        groups = defaultdict(lambda: {"article_count": 0, "views_sum": 0, "engagement_sum": 0.0, "shares_sum": 0})
+        for r in rows:
+            t = r["topic"]
+            groups[t]["article_count"] += 1
+            groups[t]["views_sum"]      += r.get("views", 0)
+            groups[t]["engagement_sum"] += r.get("engagement_rate", 0)
+            groups[t]["shares_sum"]     += r.get("shares", 0)
+        return sorted(
+            [{"topic": t,
+              "article_count": v["article_count"],
+              "avg_views": round(v["views_sum"] / v["article_count"], 0),
+              "avg_engagement": round(v["engagement_sum"] / v["article_count"], 2),
+              "avg_shares": round(v["shares_sum"] / v["article_count"], 1)}
+             for t, v in groups.items()],
+            key=lambda x: x["avg_engagement"], reverse=True
+        )
+
     if query_type == "daily_trend":
-        return [
-            {"date": "2024-01-08", "daily_views": 1250, "article_count": 5},
-            {"date": "2024-01-07", "daily_views": 980,  "article_count": 4},
-            {"date": "2024-01-06", "daily_views": 1520, "article_count": 6},
-            {"date": "2024-01-05", "daily_views": 870,  "article_count": 3},
-            {"date": "2024-01-04", "daily_views": 1100, "article_count": 5},
-            {"date": "2024-01-03", "daily_views": 1380, "article_count": 6},
-            {"date": "2024-01-02", "daily_views": 760,  "article_count": 3},
-        ]
+        groups = defaultdict(lambda: {"daily_views": 0, "article_count": 0})
+        for r in rows:
+            date_str = str(r.get("published_date", ""))[:10]
+            groups[date_str]["daily_views"]   += r.get("views", 0)
+            groups[date_str]["article_count"] += 1
+        return sorted(
+            [{"date": d, "daily_views": v["daily_views"], "article_count": v["article_count"]}
+             for d, v in groups.items()],
+            key=lambda x: x["date"], reverse=True
+        )[:30]
+
     if query_type == "performance":
-        return [
-            {"title": "AI Trends 2024",        "topic": "AI",     "views": 450, "engagement_rate": 0.85, "shares": 25, "published_date": "2024-01-08"},
-            {"title": "DevOps Best Practices", "topic": "DevOps", "views": 320, "engagement_rate": 0.72, "shares": 18, "published_date": "2024-01-07"},
-            {"title": "Web3 Fundamentals",     "topic": "Web3",   "views": 210, "engagement_rate": 0.68, "shares": 12, "published_date": "2024-01-06"},
-            {"title": "Cloud Architecture",    "topic": "Cloud",  "views": 380, "engagement_rate": 0.76, "shares": 21, "published_date": "2024-01-05"},
-        ]
-    # list / fallback
-    return [
-        {"id": 1, "title": "AI Trends 2024",        "topic": "AI",     "views": 450, "engagement_rate": 0.85},
-        {"id": 2, "title": "DevOps Best Practices", "topic": "DevOps", "views": 320, "engagement_rate": 0.72},
-        {"id": 3, "title": "Web3 Fundamentals",     "topic": "Web3",   "views": 210, "engagement_rate": 0.68},
-        {"id": 4, "title": "Cloud Architecture",    "topic": "Cloud",  "views": 380, "engagement_rate": 0.76},
-    ]
+        return sorted(
+            [{"title": r["title"],
+              "topic": r["topic"],
+              "views": r.get("views", 0),
+              "engagement_rate": round(r.get("engagement_rate", 0), 2),
+              "shares": r.get("shares", 0),
+              "published_date": str(r.get("published_date", ""))[:10]}
+             for r in rows],
+            key=lambda x: x["views"], reverse=True
+        )[:20]
+
+    # list / fallback — return raw rows
+    return [{"id": r.get("id"), "title": r["title"], "topic": r["topic"],
+             "views": r.get("views", 0), "engagement_rate": round(r.get("engagement_rate", 0), 2)}
+            for r in rows[:10]]
 
 # ============================================================================
 # ENDPOINTS
