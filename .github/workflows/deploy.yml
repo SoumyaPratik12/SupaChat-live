@@ -80,17 +80,17 @@ jobs:
         run: sleep 30
 
       - name: Check Nginx (UI)
-        run: curl -f http:13.239.134.4
+        run: curl -f http://13.239.134.4
 
       - name: Check Backend API
-        run: curl -f http:13.239.134.4/api/health
+        run: curl -f http://13.239.134.4/api/health
 
       - name: Deployment Summary
         run: |
           echo "========================================"
           echo " SupaChat Deployment Successful"
           echo "========================================"
-          echo " App     : http:13.239.134.4"
-          echo " Grafana : http:13.239.134.4:3001"
-          echo " Prom    : http:13.239.134.4:9090"
+          echo " App     : http://13.239.134.4"
+          echo " Grafana : http://13.239.134.4:3001"
+          echo " Prom    : http://13.239.134.4:9090"
           echo "========================================"
