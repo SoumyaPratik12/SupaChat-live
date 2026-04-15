@@ -35,7 +35,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         with:
-          host: ${{ secrets.EC2_HOST }}        # ✅ unified
+          host: 13.239.134.4       # ✅ unified
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
@@ -80,17 +80,17 @@ jobs:
         run: sleep 30
 
       - name: Check Nginx (UI)
-        run: curl -f http://${{ secrets.EC2_HOST }}
+        run: curl -f http:13.239.134.4
 
       - name: Check Backend API
-        run: curl -f http://${{ secrets.EC2_HOST }}/api/health
+        run: curl -f http:13.239.134.4/api/health
 
       - name: Deployment Summary
         run: |
           echo "========================================"
           echo " SupaChat Deployment Successful"
           echo "========================================"
-          echo " App     : http://${{ secrets.EC2_HOST }}"
-          echo " Grafana : http://${{ secrets.EC2_HOST }}:3001"
-          echo " Prom    : http://${{ secrets.EC2_HOST }}:9090"
+          echo " App     : http:13.239.134.4"
+          echo " Grafana : http:13.239.134.4:3001"
+          echo " Prom    : http:13.239.134.4:9090"
           echo "========================================"
