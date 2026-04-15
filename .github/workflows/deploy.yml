@@ -35,7 +35,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         with:
-          host: ${{ secrets.EC2_HOST }}     # MUST be correct
+          host: 13.239.134.4    # MUST be correct
           username: ec2-user               # 🔥 FIXED (do not depend on secret)
           key: ${{ secrets.EC2_SSH_KEY }}  # MUST contain full .pem
           port: 22
