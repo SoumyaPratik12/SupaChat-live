@@ -35,9 +35,9 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         with:
-          host: 13.239.134.4    # MUST be correct
-          username: ec2-user               # 🔥 FIXED (do not depend on secret)
-          key: ${{ secrets.EC2_SSH_KEY }}  # MUST contain full .pem
+          host: ${{ secrets.EC2_HOST }}        # ✅ unified
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           timeout: 60s
           command_timeout: 20m
@@ -79,5 +79,18 @@ jobs:
       - name: Wait for containers
         run: sleep 30
 
-      - name: Check Nginx
-        run: curl -f http://${{ secrets.EC2_HOST }} || exit 1
+      - name: Check Nginx (UI)
+        run: curl -f http://${{ secrets.EC2_HOST }}
+
+      - name: Check Backend API
+        run: curl -f http://${{ secrets.EC2_HOST }}/api/health
+
+      - name: Deployment Summary
+        run: |
+          echo "========================================"
+          echo " SupaChat Deployment Successful"
+          echo "========================================"
+          echo " App     : http://${{ secrets.EC2_HOST }}"
+          echo " Grafana : http://${{ secrets.EC2_HOST }}:3001"
+          echo " Prom    : http://${{ secrets.EC2_HOST }}:9090"
+          echo "========================================"
